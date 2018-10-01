@@ -1,0 +1,182 @@
+---
+- hosts: provisioner
+  gather_facts: no
+  vars:
+    private_key_file: kubernetes-kp.pem
+    k_hosts_file: k-hosts
+    deploy_path: /deploy
+    conf_path: /deploy/conf
+    k8s_config_all: all.yml
+    k8s_config_cluster: k8s-cluster.yml
+    k8s_config_hosts: hosts.ini
+    cinder_config: openstack_cinder
+    sc_config: storageclass.yml
+    zk_config: zookeeper.yml
+
+  tasks:
+  - name: Check if RSA host key exists
+    stat:
+      path: ~/.ssh/id_rsa
+    register: rsa_key
+
+  - name: Generate RSA host key
+    command: ssh-keygen -t rsa -N "" -f ~/.ssh/id_rsa -C kube-provisioner@provisioner -b 2048
+    when: rsa_key.stat.exists == False
+  
+  - name: Check if init .pem key exists
+    stat: 
+      path: /tmp/{{private_key_file}}
+    register: init_pem_key
+  
+  - name: Copy init pem key
+    copy:
+      src: ../conf/{{private_key_file}}
+      dest: /tmp/{{private_key_file}}
+      mode: 0600
+    when: init_pem_key.stat.exists == False
+
+  - name: Check if {{k_hosts_file}} exists
+    stat: 
+      path: /tmp/{{k_hosts_file}}
+    register: k_hosts
+  
+  - name: Copy {{k_hosts_file}}
+    copy:
+      src: "../{{k_hosts_file}}"
+      dest: "/tmp/{{k_hosts_file}}"
+    when: k_hosts.stat.exists == False
+
+
+  # update provisioner's /etc/hosts
+  - name: Check if {{k_hosts_file}} exists
+    stat: 
+      path: /tmp/{{k_hosts_file}}
+    register: k_hosts_check
+
+  - name: Get IP and hostname from {{k_hosts_file}}
+    command: "cat /tmp/{{k_hosts_file}}"
+    register: k_hosts_out
+    when: k_hosts_check.stat.exists == True
+
+  - name: Check if /etc/hosts.backup exists
+    stat: 
+      path: /etc/hosts.backup
+    register: etc_hosts_backup    
+
+  - name: Create /etc/hosts copy
+    shell: cp -p /etc/hosts /etc/hosts.backup
+    register: etc_hosts_copy
+    when: etc_hosts_backup.stat.exists == False
+
+  - name: Append to /etc/hosts
+    shell: echo "{{k_hosts_out.stdout}}" >> /etc/hosts
+    run_once: true
+    # when: k_hosts_out is succeeded and etc_hosts_copy.stat.exists == False
+    when: etc_hosts_backup.stat.exists == False
+
+
+  # copy ssh-k-hosts file
+  - name: Check if ssh-k-hosts exists
+    stat: 
+      path: /tmp/ssh-k-hosts
+    register: ssh_k_hosts
+  
+  - name: Copy ssh-k-hosts
+    copy:
+      src: ../ssh-k-hosts
+      dest: /tmp/ssh-k-hosts
+    when: ssh_k_hosts.stat.exists == False
+
+
+  # copy .pub keys from provisioner to cluster nodes
+  - name: Check if RSA host key exists
+    stat:
+      path: ~/.ssh/id_rsa
+    register: rsa_key_check
+  # TO BE IMPROVED - if you run playbook it will always add
+  - name: Copy .pub key to cluster nodes
+    shell: for i in `cat /tmp/k-hosts | awk '{print $1}'`; do scp -i /tmp/{{private_key_file}} -o StrictHostKeyChecking=no ~/.ssh/id_rsa.pub root@$i:/tmp; done
+    when: rsa_key_check.stat.exists == True
+  # TO BE IMPROVED - if you run playbook it will always add
+  - name: Add .pub key to authorized_keys
+    shell: for i in `cat /tmp/k-hosts | awk '{print $1}'`; do ssh -i /tmp/kubernetes-kp.pem -o StrictHostKeyChecking=no root@$i 'cat /tmp/id_rsa.pub >> ~/.ssh/authorized_keys'; done
+    when: rsa_key_check.stat.exists == True
+
+
+  # create deployment directory
+  - name: Check if deployment directory was created
+    stat:
+      path: "{{deploy_path}}"
+    register: deploy_dir
+
+  - name: Create deployment directory
+    file:
+      path: "{{deploy_path}}"
+      state: directory
+    when: deploy_dir.stat.exists == False
+
+
+  # create conf directory
+  - name: Check if conf directory was created
+    stat:
+      path: "{{conf_path}}"
+    register: conf_dir
+
+  - name: Create conf directory
+    file:
+      path: "{{conf_path}}"
+      state: directory
+    when: conf_dir.stat.exists == False
+
+  # copy files to deployment directory
+  - name: Copy {{ k8s_config_all }} to {{ deploy_path }}
+    copy:
+      src: "../kubespray_conf/{{ k8s_config_all }}"
+      dest: "{{ deploy_path }}/{{ k8s_config_all }}"
+
+  - name: Copy {{ k8s_config_cluster }} to {{ deploy_path }}
+    copy:
+      src: "../kubespray_conf/{{ k8s_config_cluster }}"
+      dest: "{{ deploy_path }}/{{ k8s_config_cluster }}"
+
+  # copy files to conf directory
+  - name: Copy {{ cinder_config }} to {{ conf_path }}
+    copy:
+      src: "../conf/{{ cinder_config }}"
+      dest: "{{ conf_path }}/{{ cinder_config }}"
+
+  - name: Copy {{ sc_config }} to {{ conf_path }}
+    copy:
+      src: "../conf/{{ sc_config }}"
+      dest: "{{ conf_path }}/{{ sc_config }}"
+
+  - name: Copy {{ zk_config }} to {{ conf_path }}
+    copy:
+      src: "../conf/{{ zk_config }}"
+      dest: "{{ conf_path }}/{{ zk_config }}"
+
+
+  # generate hosts.ini (python script)
+  - name: Generate {{ k8s_config_hosts }}
+    local_action: shell python generateHosts.py
+    # if: 'python generateHosts.py > hosts.ini' nothing will be registered
+    register: python_result
+
+  # python itself save output to hosts.ini, ansible won't that's why redirection is needed    
+  - debug:
+      msg: "{{python_result.stdout}}"
+
+  - name: Redirect to {{ k8s_config_hosts }}
+    local_action: shell echo "{{python_result.stdout}}" > "{{ k8s_config_hosts }}"
+
+  - name: Copy {{ k8s_config_hosts }} to deployment dir
+    copy:
+      src: "./{{ k8s_config_hosts }}"
+      dest: "{{ deploy_path }}/{{ k8s_config_hosts }}"
+
+
+  # DELETE
+  - name: Delete init pem key
+    file:
+      path: /tmp/{{private_key_file}}
+      state: absent

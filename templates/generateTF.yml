@@ -1,0 +1,141 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+
+    openstack:
+      user_name : ""
+      tenant_name : ""
+      password : ""
+      auth_url : ""
+      key_pair : ""
+      image_id : ""
+      tenant_id : ""
+      availability_zone : ""
+      network : ""
+      region : ""
+      pool : ""
+      sec_group : ""
+      master_name : "kube-master"
+      nb_kube_masters : 3
+      kube_masters_type : ""
+      worker_name : "kube-worker"
+      nb_kube_workers : 3
+      kube_workers_type : ""
+      lb_name : "kube-lb"
+      nb_kube_lb : 1
+      kube_lb_type : ""
+      provisioner_name : "kube-provisioner"
+      nb_kube_provisioner : 1
+      kube_provisioner_type : ""        
+      
+    port_definition_kube_masters:
+      - proto: tcp
+        from_port: 8080
+        to_port: 8080
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 22
+        to_port: 22
+        cidr_ip: 0.0.0.0/0      
+      #Kubernetes API server
+      - proto: tcp
+        from_port: 6443
+        to_port: 6443
+        cidr_ip: 0.0.0.0/0
+      #etcd server client API
+      - proto: tcp
+        from_port: 2379
+        to_port: 2380
+        cidr_ip: 0.0.0.0/0
+      #Kubelet API
+      - proto: tcp
+        from_port: 10250
+        to_port: 10250
+        cidr_ip: 0.0.0.0/0         
+      #kube-scheduler
+      - proto: tcp
+        from_port: 10251
+        to_port: 10251
+        cidr_ip: 0.0.0.0/0 
+      #kube-controller-manager
+      - proto: tcp
+        from_port: 10252
+        to_port: 10252
+        cidr_ip: 0.0.0.0/0 
+      #Read-only Kubelet API (Heapster)
+      - proto: tcp
+        from_port: 10255
+        to_port: 10255
+        cidr_ip: 0.0.0.0/0 
+
+    port_definition_kube_workers:
+      - proto: tcp
+        from_port: 8080
+        to_port: 8080
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 22
+        to_port: 22
+        cidr_ip: 0.0.0.0/0        
+      #Kubelet API
+      - proto: tcp
+        from_port: 10250
+        to_port: 10250
+        cidr_ip: 0.0.0.0/0
+      #Read-only Kubelet API (Heapster)
+      - proto: tcp
+        from_port: 10255
+        to_port: 10255
+        cidr_ip: 0.0.0.0/0
+      #Default port range for NodePort Services
+      - proto: tcp
+        from_port: 30000
+        to_port: 32767
+        cidr_ip: 0.0.0.0/0
+      #Zookeeper (to be FIXED)
+      - proto: udp
+        from_port: 1
+        to_port: 65000
+        cidr_ip: 0.0.0.0/0          
+
+    port_definition_kube_lb:
+      - proto: tcp
+        from_port: 8080
+        to_port: 8080
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 22
+        to_port: 22
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 80
+        to_port: 80
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 443
+        to_port: 443
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 8443
+        to_port: 8443
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 6443
+        to_port: 6443
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 8001
+        to_port: 8001
+        cidr_ip: 0.0.0.0/0                                    
+
+  environment:
+    # do not modify
+    http_proxy: ""
+    https_proxy: ""
+
+  tasks:
+  - name: create tf file
+    template: src=commissioning.conf.j2 dest=./kubespray.tf

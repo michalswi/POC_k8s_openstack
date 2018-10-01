@@ -1,0 +1,4 @@
+spawn terraform destroy
+expect "Enter a value:"
+send -- "yes\r"
+interact

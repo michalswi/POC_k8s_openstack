@@ -1,0 +1,114 @@
+---
+- hosts: provisioner
+  gather_facts: no
+  vars:
+    private_key_file: kubernetes-kp.pem
+    deploy_path: /deploy
+    k8s_config_all: all.yml
+    k8s_config_cluster: k8s-cluster.yml
+    k8s_config_hosts: hosts.ini
+    kubespray_version: 7d3a6541d77bdcc19720bbd123fef773a5c3f35e
+    # cinder_config: openstack.conf
+  
+  tasks:
+  # os check
+  - name: Check OS distribution
+    stat:
+      path: /etc/redhat-release
+    register: os_distribution
+
+
+  # install some packages
+  - name: Install python-pip
+    package:
+      name: python-pip
+    # when: os_distribution.stat.exists == True
+
+  - name: Install screen
+    package:
+      name: screen
+
+
+  # ubuntu configuration part
+  # - name: Run "apt-get update"
+  #   apt:
+  #     update_cache: yes
+  #   when: os_distribution.stat.exists == False
+
+  # - name: Update all packages to the latest version
+  #   apt:
+  #     upgrade: dist
+  #   when: os_distribution.stat.exists == False
+
+
+  # TO BE IMPROVED - if you run playbook twice it will always add
+  - name: Edit ~/.profile if ubuntu
+    lineinfile:
+      path: ~/.profile
+      line: |
+        export LANGUAGE=en_US.UTF-8
+        export LC_ALL=en_US.UTF-8
+    when: os_distribution.stat.exists == False
+
+  - name: Update ~/.bashrc with /deploy directory
+    lineinfile:
+      path: ~/.bashrc
+      line: >
+        if [[ -n $SSH_CONNECTION ]] ; then
+            cd /deploy
+        fi
+
+  # To avoid: "AttributeError: 'module' object has no attribute 'SSL_ST_INIT'"
+  # pip install pyOpenSSL==16.2.0
+  - name: Install required pyOpenSSL
+    pip:
+      name: pyOpenSSL
+      version: 16.2.0
+    when: os_distribution.stat.exists == False    
+
+
+  # deployment
+  - name: Check if deployment directory exists
+    stat:
+      path: "{{deploy_path}}"
+    register: deploy_dir
+
+  - name: Clone kubespray repo
+    git: 
+      repo: https://github.com/kubernetes-incubator/kubespray.git
+      dest: "{{deploy_path}}/kubespray"
+      version: "{{kubespray_version}}"
+    when: deploy_dir.stat.exists == True
+
+  - name: Check if kubespray directory exists
+    stat:
+      path: "{{deploy_path}}/kubespray"
+    register: kubespray_dir    
+  
+  - pip:
+      requirements: "{{deploy_path}}/kubespray/requirements.txt"
+
+
+  # copy files
+  - name: Create inventory/mycluster directory
+    shell: cp -rfp {{deploy_path}}/kubespray/inventory/sample {{deploy_path}}/kubespray/inventory/mycluster
+    run_once: true    
+    when: kubespray_dir.stat.exists == True
+
+  - name: Copy {{k8s_config_hosts}} to inventory/mycluster
+    shell: /bin/cp {{deploy_path}}/{{k8s_config_hosts}} {{deploy_path}}/kubespray/inventory/mycluster/{{k8s_config_hosts}}
+    run_once: true    
+    when: kubespray_dir.stat.exists == True
+
+  - name: Copy {{k8s_config_all}} to inventory/mycluster
+    shell: /bin/cp {{deploy_path}}/{{k8s_config_all}} {{deploy_path}}/kubespray/inventory/mycluster/group_vars/{{k8s_config_all}}
+    # shell: /bin/cp {{deploy_path}}/{{k8s_config_all}} {{deploy_path}}/kubespray/inventory/mycluster/group_vars/all/{{k8s_config_all}}
+    run_once: true    
+    when: kubespray_dir.stat.exists == True
+
+  - name: Copy {{k8s_config_cluster}} to inventory/mycluster
+    shell: /bin/cp {{deploy_path}}/{{k8s_config_cluster}} {{deploy_path}}/kubespray/inventory/mycluster/group_vars/{{k8s_config_cluster}}
+    # shell: /bin/cp {{deploy_path}}/{{k8s_config_cluster}} {{deploy_path}}/kubespray/inventory/mycluster/group_vars/k8s-cluster/{{k8s_config_cluster}}
+    run_once: true    
+    when: kubespray_dir.stat.exists == True
+ 

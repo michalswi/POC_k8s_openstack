@@ -1,0 +1,277 @@
+//
+// master name
+variable "master_name" {
+  default = "{{ openstack.master_name }}"
+}
+// master number
+variable "nb_kube_masters" {
+  default = {{ openstack.nb_kube_masters }}
+}
+// master flavor
+variable "kube_masters_type" {
+  default = "{{ openstack.kube_masters_type }}"
+}
+
+// worker name
+variable "worker_name" {
+  default = "{{ openstack.worker_name }}"
+}
+// worker number
+variable "nb_kube_workers" {
+  default = {{ openstack.nb_kube_workers }}
+}
+// worker flavor
+variable "kube_workers_type" {
+  default = "{{ openstack.kube_workers_type }}"
+}
+
+// lb name
+variable "lb_name" {
+  default = "{{ openstack.lb_name }}"
+}
+// lb number
+variable "nb_kube_lb" {
+  default = {{ openstack.nb_kube_lb }}
+}
+// lb flavor
+variable "kube_lb_type" {
+  default = "{{ openstack.kube_lb_type }}"
+}
+
+// provisioner name
+variable "provisioner_name" {
+  default = "{{ openstack.provisioner_name }}"
+}
+// provisioner number
+variable "nb_kube_provisioner" {
+  default = {{ openstack.nb_kube_provisioner }}
+}
+// provisioner flavor
+variable "kube_provisioner_type" {
+  default = "{{ openstack.kube_provisioner_type }}"
+}
+
+// floating ip pool
+variable "pool" {
+  default = "{{ openstack.pool }}"
+}
+
+variable "key_pair" {
+  default = "{{ openstack.key_pair }}"
+}
+
+variable "image_id" {
+  default = "{{ openstack.image_id }}"
+}
+
+variable "region" {
+  default = "{{ openstack.region }}"
+}
+
+variable "tenant_id" {
+  default = "{{ openstack.tenant_id }}"
+}
+
+variable "availability_zone" {
+  default = "{{ openstack.availability_zone }}"
+}
+
+variable "network" {
+  default = "{{ openstack.network }}"
+}
+
+variable "sec_group" {
+  default = "{{ openstack.sec_group }}"
+}
+
+// security group
+resource "openstack_compute_secgroup_v2" "kube-master" {
+  name        = "kube-master-sg"
+  description = "Security Group for kube-master"
+}
+
+resource "openstack_compute_secgroup_v2" "kube-worker" {
+  name        = "kube-worker-sg"
+  description = "Security Group for kube-worker"
+}
+
+resource "openstack_compute_secgroup_v2" "kube-lb" {
+  name        = "kube-lb-sg"
+  description = "Security Group for kube-lb"
+}
+
+provider "openstack" {
+  user_name   = "{{ openstack.user_name }}"
+  tenant_name = "{{ openstack.tenant_name }}"
+  tenant_id   = "{{openstack.tenant_id}}"
+  password    = "{{ openstack.password }}"
+  auth_url    = "{{ openstack.auth_url }}"
+}
+
+//================================
+//MASTER
+resource "openstack_compute_instance_v2" "kube-master" {
+  //name              = "${var.runner_name}"
+  name              = "${var.master_name}-${format("%01d", count.index + 1)}"
+  count             = "${var.nb_kube_masters}"
+  region            = "${var.region}"
+  image_id          = "${var.image_id}"
+  availability_zone = "${var.availability_zone}"
+  flavor_name       = "${var.kube_masters_type}"
+  key_pair          = "${var.key_pair}"
+  //security_groups   = ["${var.sec_group}"]
+  security_groups = ["${openstack_compute_secgroup_v2.kube-master.id}"]
+  
+  network {
+    name = "${var.network}"
+  }
+}
+
+{% for rule in port_definition_kube_masters  %}
+resource "openstack_networking_secgroup_rule_v2" "kube-master-allow-{{ rule.proto }}-{{ rule.from_port }}-to-{{ rule.to_port }}" {
+  region            = "${var.region}"
+  tenant_id         = "${var.tenant_id}"
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "{{ rule.proto }}"
+  port_range_min    = {{ rule.from_port }}
+  port_range_max    = {{ rule.to_port }}
+  security_group_id = "${openstack_compute_secgroup_v2.kube-master.id}"
+  remote_ip_prefix  = "{{ rule.cidr_ip }}"
+}
+{% endfor %}
+
+resource "null_resource" "master" {
+  provisioner "local-exec" {
+    command = "echo ${element(openstack_compute_instance_v2.kube-master.*.network.0.fixed_ip_v4, count.index)} ${element(openstack_compute_instance_v2.kube-master.*.name, count.index)} >> k-hosts"
+  }
+  count = "${var.nb_kube_masters}"
+}
+
+//================================
+//WORKER
+resource "openstack_compute_instance_v2" "kube-worker" {
+  name              = "${var.worker_name}-${format("%01d", count.index + 1)}"
+  count             = "${var.nb_kube_workers}"
+  region            = "${var.region}"
+  image_id          = "${var.image_id}"
+  availability_zone = "${var.availability_zone}"
+  flavor_name       = "${var.kube_workers_type}"
+  key_pair          = "${var.key_pair}"
+  security_groups = ["${openstack_compute_secgroup_v2.kube-worker.id}"]  
+
+  network {
+    name = "${var.network}"
+  }
+}
+
+{% for rule in port_definition_kube_workers  %}
+resource "openstack_networking_secgroup_rule_v2" "kube-worker-allow-{{ rule.proto }}-{{ rule.from_port }}-to-{{ rule.to_port }}" {
+  region            = "${var.region}"
+  tenant_id         = "${var.tenant_id}"
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "{{ rule.proto }}"
+  port_range_min    = {{ rule.from_port }}
+  port_range_max    = {{ rule.to_port }}
+  security_group_id = "${openstack_compute_secgroup_v2.kube-worker.id}"
+  remote_ip_prefix  = "{{ rule.cidr_ip }}"
+}
+{% endfor %}
+
+resource "null_resource" "worker" {
+  provisioner "local-exec" {
+    command = "echo ${element(openstack_compute_instance_v2.kube-worker.*.network.0.fixed_ip_v4, count.index)} ${element(openstack_compute_instance_v2.kube-worker.*.name, count.index)} >> k-hosts"
+  }
+  count = "${var.nb_kube_workers}"
+}
+
+//================================
+//PROVISIONER
+resource "openstack_compute_instance_v2" "kube-provisioner" {
+  name              = "${var.provisioner_name}"
+  count             = "${var.nb_kube_provisioner}"
+  region            = "${var.region}"
+  image_id          = "${var.image_id}"
+  availability_zone = "${var.availability_zone}"
+  flavor_name       = "${var.kube_provisioner_type}"
+  key_pair          = "${var.key_pair}"
+  security_groups = ["default"]
+  
+  network {
+    name = "${var.network}"
+  }
+}
+
+resource "openstack_compute_floatingip_v2" "fip_kube-provisioner" {
+  pool = "${var.pool}"
+  count = "${var.nb_kube_provisioner}"
+}
+
+resource "openstack_compute_floatingip_associate_v2" "fip_kube-provisioner" {
+  floating_ip = "${element(openstack_compute_floatingip_v2.fip_kube-provisioner.*.address, count.index)}"
+  instance_id = "${element(openstack_compute_instance_v2.kube-provisioner.*.id, count.index)}"
+  count = "${var.nb_kube_provisioner}"
+}
+
+resource "null_resource" "provisioner" {
+  //depends_on = ["openstack_compute_instance_v2.kube-master", "openstack_compute_instance_v2.kube-worker"]
+
+  provisioner "local-exec" {
+    //privateIP
+    //command = "echo ${openstack_compute_instance_v2.kube-provisioner.network.0.fixed_ip_v4} >> proIP"
+    //floatingIP
+    // add 'IP hostname' to ssh-hosts
+    //command = "echo ${openstack_compute_floatingip_v2.fip_kube-provisioner.0.address} ${openstack_compute_instance_v2.kube-provisioner.name} >> ssh-hosts"
+    command = "echo [provisioner] >> ssh-hosts && echo ${openstack_compute_floatingip_v2.fip_kube-provisioner.0.address} >> ssh-hosts"
+  }
+}
+//================================
+//LB
+resource "openstack_compute_instance_v2" "kube-lb" {
+  name              = "${var.lb_name}"
+  count             = "${var.nb_kube_lb}"
+  region            = "${var.region}"
+  image_id          = "${var.image_id}"
+  availability_zone = "${var.availability_zone}"
+  flavor_name       = "${var.kube_lb_type}"
+  key_pair          = "${var.key_pair}"
+  security_groups = ["default","${openstack_compute_secgroup_v2.kube-lb.id}"]
+  
+  network {
+    name = "${var.network}"
+  }
+}
+
+resource "openstack_compute_floatingip_v2" "fip_kube-lb" {
+  pool = "${var.pool}"
+  count = "${var.nb_kube_lb}"
+}
+
+resource "openstack_compute_floatingip_associate_v2" "fip_kube-lb" {
+  floating_ip = "${element(openstack_compute_floatingip_v2.fip_kube-lb.*.address, count.index)}"
+  instance_id = "${element(openstack_compute_instance_v2.kube-lb.*.id, count.index)}"
+  count = "${var.nb_kube_lb}"
+}
+
+{% for rule in port_definition_kube_lb  %}
+resource "openstack_networking_secgroup_rule_v2" "kube-lb-allow-{{ rule.proto }}-{{ rule.from_port }}-to-{{ rule.to_port }}" {
+  region            = "${var.region}"
+  tenant_id         = "${var.tenant_id}"
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "{{ rule.proto }}"
+  port_range_min    = {{ rule.from_port }}
+  port_range_max    = {{ rule.to_port }}
+  security_group_id = "${openstack_compute_secgroup_v2.kube-lb.id}"
+  remote_ip_prefix  = "{{ rule.cidr_ip }}"
+}
+{% endfor %}
+
+resource "null_resource" "lb" {
+  provisioner "local-exec" {
+    command = "echo [lb] >> ssh-hosts && echo ${openstack_compute_floatingip_v2.fip_kube-lb.0.address} >> ssh-hosts"
+  }
+}
+
+//================================

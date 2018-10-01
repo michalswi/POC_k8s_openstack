@@ -1,0 +1,16 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: rancher-ing
+  annotations:
+    kubernetes.io/ingress.class: "rancher"
+  # namespace: default
+spec:
+  rules:
+  - host: api.sample.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: rancher
+          servicePort: 443

@@ -1,0 +1,10 @@
+---
+- hosts: lb
+  gather_facts: no
+
+  tasks:
+  - name: Install nginx
+    package:
+      name: nginx
+  
+  

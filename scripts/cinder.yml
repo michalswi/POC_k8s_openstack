@@ -1,0 +1,25 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    deploy_path: /deploy
+    cinder_config: openstack_cinder
+    cinder_config_dir: /etc/kubernetes/ssl
+    env_var_file: /etc/environment
+
+  tasks:
+  - name: Get ENV variables
+    shell: /bin/cat "{{ deploy_path }}/{{ cinder_config }}"
+    register: get_env_vars
+
+  - name: Make "{{ env_var_file }}" copy
+    copy:
+      src: "{{ env_var_file }}"
+      dest: "{{ env_var_file }}.backup"
+
+  - name: Add ENV variables to /etc/environment
+    lineinfile:
+      path: "{{ env_var_file }}"
+      line: "{{ get_env_vars.stdout }}"
+
